@@ -1,0 +1,16 @@
+{
+  "endpoint": {
+    "host": "127.0.0.1",
+    "port": 9150,
+    "path": "/tts",
+    "timeout_seconds": 120,
+    "text_field_name": "text",
+    "reference_audio_field_name": "reference_audio",
+    "transcript_text_field_name": ""
+  },
+  "headers": [],
+  "reference_audio_path": "",
+  "transcript_path": "",
+  "overwrite_existing_tts_audio": false,
+  "mappings": []
+}

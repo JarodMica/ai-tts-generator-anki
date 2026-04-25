@@ -1,0 +1,9 @@
+addon-docs/
+.venv
+docs/
+Irodori-API.md
+__pycache__/
+*.pyc
+dist/
+scripts/
+build.bat
