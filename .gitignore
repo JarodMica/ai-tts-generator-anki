@@ -5,5 +5,3 @@ Irodori-API.md
 __pycache__/
 *.pyc
 dist/
-scripts/
-build.bat
