@@ -1,5 +1,10 @@
 # AI Changelog
 
+## 2026-04-25
+
+- Added minimal `docs/CODE_STANDARDS.md` with `Public docs: false` so documentation update workflows have the required repository standards file.
+- Updated README and operations docs to remove distribution wording from the public README while keeping package build details in internal docs. :)
+
 ## 2026-04-24
 
 - Verified documentation against the current `SentenceAudioGenerator` package, build scripts, config defaults, and AnkiWeb packaging flow.

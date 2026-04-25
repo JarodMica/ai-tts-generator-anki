@@ -18,9 +18,9 @@ Sentence Audio Generator (AI TTS) is an Anki add-on that generates audio for sel
 - Windows-focused local workflow.
 - A running local TTS server that accepts multipart form uploads and returns `audio/wav` bytes.
 
-## Build For Release
+## Build
 
-Use the repo-local build script to package the add-on for upload:
+Use the repo-local build script to package the add-on:
 
 ```bat
 build.bat
@@ -34,11 +34,7 @@ build.bat
 - rebuilds `dist\SentenceAudioGenerator.ankiaddon`
 - rebuilds `dist\SentenceAudioGenerator-<version>.ankiaddon`
 
-## Distribution
-
-Upload the generated `.ankiaddon` file from `dist/` to AnkiWeb. The archive is flattened so the add-on files are placed at archive root, which is the format AnkiWeb expects.
-
-Recommended upload artifact:
+Use this generated package when installing or updating the add-on:
 
 ```text
 dist\SentenceAudioGenerator.ankiaddon
@@ -79,10 +75,3 @@ tts-<note_id>-<sha1_prefix>.wav
 ```
 
 The `tts` prefix is also used by the overwrite option to distinguish generated TTS audio from other audio in the target field.
-
-## Related Docs
-
-- [docs/ARCHITECTURE.md](C:/Users/jarod/OneDrive/Desktop/code/MY_GITHUB_UPLOADS/anki-sentence-audio-addon/docs/ARCHITECTURE.md:1)
-- [docs/CONFIG.md](C:/Users/jarod/OneDrive/Desktop/code/MY_GITHUB_UPLOADS/anki-sentence-audio-addon/docs/CONFIG.md:1)
-- [docs/DESIGN_PLAN.md](C:/Users/jarod/OneDrive/Desktop/code/MY_GITHUB_UPLOADS/anki-sentence-audio-addon/docs/DESIGN_PLAN.md:1)
-- [docs/OPERATIONS.md](C:/Users/jarod/OneDrive/Desktop/code/MY_GITHUB_UPLOADS/anki-sentence-audio-addon/docs/OPERATIONS.md:1)
