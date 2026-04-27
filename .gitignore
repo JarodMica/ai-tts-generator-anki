@@ -5,3 +5,4 @@ Irodori-API.md
 __pycache__/
 *.pyc
 dist/
+local/

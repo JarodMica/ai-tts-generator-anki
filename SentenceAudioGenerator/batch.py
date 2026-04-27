@@ -15,8 +15,9 @@ from aqt.browser import Browser
 from aqt.operations import CollectionOp
 from aqt.utils import askUser, showInfo, showWarning
 
-from .config import AddonConfig, MappingConfig, load_config
+from .config import AddonConfig, MappingConfig, TranslationMappingConfig, load_config
 from .config_dialog import show_config_dialog
+from .translate_client import TranslationClientError, translate as translate_text
 from .tts_client import TTSClientError, TTSRequest, synthesize
 
 SOUND_TAG_RE = re.compile(r"(?i)\[sound:(?P<fname>[^\]]+)\]")
@@ -318,6 +319,221 @@ def show_batch_summary(result: BatchRunResult) -> None:
         "Bulk add TTS finished.",
         f"Processed: {result.total}",
         f"Generated: {result.counts.generated}",
+        f"Skipped (empty source): {result.counts.skipped_empty}",
+        f"Skipped (existing target): {result.counts.skipped_existing}",
+        f"Skipped (no mapping): {result.counts.skipped_unmapped}",
+        f"Failed: {result.counts.failed}",
+    ]
+    if result.errors:
+        lines.append("")
+        lines.append("Failures:")
+        lines.extend(result.errors[:25])
+        if len(result.errors) > 25:
+            lines.append(f"...and {len(result.errors) - 25} more.")
+    showInfo("\n".join(lines))
+
+
+@dataclass
+class TranslationCounts:
+    translated: int = 0
+    skipped_empty: int = 0
+    skipped_existing: int = 0
+    skipped_unmapped: int = 0
+    failed: int = 0
+
+
+@dataclass
+class TranslationRunResult:
+    changes: OpChanges
+    total: int
+    counts: TranslationCounts = field(default_factory=TranslationCounts)
+    errors: list[str] = field(default_factory=list)
+
+
+def run_bulk_translate(browser: Browser) -> None:
+    config = load_config()
+    note_ids = list(browser.selected_notes())
+    if not note_ids:
+        showInfo("Select one or more notes in Browse before running Bulk translate sentences.")
+        return
+
+    config = prompt_for_missing_translation_setup(browser, config)
+    if config is None:
+        return
+
+    CollectionOp(
+        browser,
+        lambda col: translate_notes(
+            col=col,
+            note_ids=note_ids,
+            config=config,
+        ),
+    ).success(lambda result: show_translation_summary(result)).run_in_background()
+
+
+def prompt_for_missing_translation_setup(
+    browser: Browser,
+    config: AddonConfig,
+) -> AddonConfig | None:
+    if not config.translation_mappings:
+        return reconfigure_if_user_wants(
+            browser,
+            config,
+            "No translation mappings are configured yet.\n\nOpen the add-on settings now?",
+            lambda updated: bool(updated.translation_mappings),
+            "No translation mappings are configured yet.",
+        )
+
+    return config
+
+
+def translate_notes(
+    *,
+    col: Collection,
+    note_ids: Sequence[int],
+    config: AddonConfig,
+) -> TranslationRunResult:
+    counts = TranslationCounts()
+    errors: list[str] = []
+    updated_notes: list[Note] = []
+    total = len(note_ids)
+
+    publish_translation_progress(total, 0, counts)
+    for index, note_id in enumerate(note_ids, start=1):
+        note = col.get_note(note_id)
+        mapping = find_translation_mapping_for_note(col, note, config.translation_mappings)
+        if not mapping:
+            counts.skipped_unmapped += 1
+            publish_translation_progress(total, index, counts, note.id, "No mapping for note.")
+            continue
+
+        if mapping.source_field not in note:
+            counts.failed += 1
+            errors.append(
+                f"Note {note.id}: source field '{mapping.source_field}' does not exist."
+            )
+            publish_translation_progress(total, index, counts, note.id, "Missing source field.")
+            continue
+
+        if mapping.target_field not in note:
+            counts.failed += 1
+            errors.append(
+                f"Note {note.id}: target field '{mapping.target_field}' does not exist."
+            )
+            publish_translation_progress(total, index, counts, note.id, "Missing target field.")
+            continue
+
+        cleaned_text = normalize_tts_text(note[mapping.source_field])
+        if not cleaned_text:
+            counts.skipped_empty += 1
+            publish_translation_progress(total, index, counts, note.id, "Skipped empty source.")
+            continue
+
+        target_value = note[mapping.target_field].strip()
+        overwrite_allowed = config.translation_overwrite_existing
+        if target_value and not overwrite_allowed:
+            counts.skipped_existing += 1
+            publish_translation_progress(
+                total,
+                index,
+                counts,
+                note.id,
+                "Skipped existing target text.",
+            )
+            continue
+
+        try:
+            translated = translate_text(
+                config,
+                cleaned_text,
+                mapping.source_language,
+                mapping.target_language,
+            )
+            note[mapping.target_field] = translated
+            updated_notes.append(note)
+            counts.translated += 1
+            publish_translation_progress(
+                total,
+                index,
+                counts,
+                note.id,
+                "Overwrote existing text."
+                if overwrite_allowed and target_value
+                else "Translated.",
+            )
+        except TranslationClientError as exc:
+            counts.failed += 1
+            errors.append(f"Note {note.id}: {exc}")
+            publish_translation_progress(total, index, counts, note.id, "Translation failed.")
+        except Exception as exc:
+            counts.failed += 1
+            errors.append(f"Note {note.id}: {exc}")
+            publish_translation_progress(total, index, counts, note.id, "Unexpected failure.")
+
+    changes = col.update_notes(updated_notes) if updated_notes else OpChanges()
+    publish_translation_progress(total, total, counts, summary="Finished.")
+    return TranslationRunResult(changes=changes, total=total, counts=counts, errors=errors)
+
+
+def find_translation_mapping_for_note(
+    col: Collection,
+    note: Note,
+    mappings: Sequence[TranslationMappingConfig],
+) -> TranslationMappingConfig | None:
+    note_type = note.note_type()
+    if not note_type:
+        return None
+    note_type_name = str(note_type["name"])
+    note_deck_names: set[str] = set()
+    for card in note.cards():
+        deck = col.decks.get_legacy(card.current_deck_id())
+        if deck:
+            note_deck_names.add(str(deck["name"]))
+    for mapping in mappings:
+        if (
+            mapping.note_type_name == note_type_name
+            and mapping.deck_name in note_deck_names
+        ):
+            return mapping
+    return None
+
+
+def publish_translation_progress(
+    total: int,
+    current: int,
+    counts: TranslationCounts,
+    note_id: int | None = None,
+    detail: str | None = None,
+    summary: str | None = None,
+) -> None:
+    label_parts = [
+        f"Bulk translate {current}/{total}",
+        f"translated={counts.translated}",
+        f"skip-empty={counts.skipped_empty}",
+        f"skip-existing={counts.skipped_existing}",
+        f"skip-unmapped={counts.skipped_unmapped}",
+        f"failed={counts.failed}",
+    ]
+    if summary:
+        label_parts.append(summary)
+    elif note_id is not None and detail:
+        label_parts.append(f"note={note_id}")
+        label_parts.append(detail)
+    label = " | ".join(label_parts)
+    mw.taskman.run_on_main(
+        lambda: mw.progress.update(
+            label=label,
+            value=current,
+            max=max(total, 1),
+        )
+    )
+
+
+def show_translation_summary(result: TranslationRunResult) -> None:
+    lines = [
+        "Bulk translate finished.",
+        f"Processed: {result.total}",
+        f"Translated: {result.counts.translated}",
         f"Skipped (empty source): {result.counts.skipped_empty}",
         f"Skipped (existing target): {result.counts.skipped_existing}",
         f"Skipped (no mapping): {result.counts.skipped_unmapped}",

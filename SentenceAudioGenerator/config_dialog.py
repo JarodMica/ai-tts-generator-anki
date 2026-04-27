@@ -26,6 +26,7 @@ from aqt.qt import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     Qt,
     QVBoxLayout,
     QWidget,
@@ -37,16 +38,19 @@ from .config import (
     EndpointConfig,
     HeaderConfig,
     MappingConfig,
+    TranslationEndpointConfig,
+    TranslationHeaderConfig,
+    TranslationMappingConfig,
     import_asset,
     load_config,
     save_config,
 )
-from .constants import USER_FILES_DIR
+from .constants import LANGUAGE_NAMES, USER_FILES_DIR
 from .version import APP_VERSION
 
 
 class WrappingPathLabel(QLabel):
-    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, text: str = "") -> None:
         super().__init__("", parent)
         self._raw_text = text
         self.setWordWrap(True)
@@ -258,6 +262,199 @@ class HeaderEditorDialog(QDialog):
         super().accept()
 
 
+class TranslationMappingEditorDialog(QDialog):
+    _CUSTOM_ENTRY = "--- Custom ---"
+
+    def __init__(
+        self,
+        parent: QWidget,
+        mapping: TranslationMappingConfig | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Translation Mapping")
+        self.setModal(True)
+        self._mapping = mapping
+
+        self.deck_combo = QComboBox(self)
+        self.note_type_combo = QComboBox(self)
+        self.source_field_combo = QComboBox(self)
+        self.target_field_combo = QComboBox(self)
+        self.source_lang_combo = QComboBox(self)
+        self.target_lang_combo = QComboBox(self)
+
+        for deck in mw.col.decks.all_names_and_ids(include_filtered=False):
+            self.deck_combo.addItem(deck.name)
+        for notetype in mw.col.models.all_names_and_ids():
+            self.note_type_combo.addItem(notetype.name)
+
+        for code, name in sorted(LANGUAGE_NAMES.items(), key=lambda x: x[1]):
+            self.source_lang_combo.addItem(f"{name} ({code})", code)
+        self.source_lang_combo.addItem(self._CUSTOM_ENTRY, self._CUSTOM_ENTRY)
+
+        for code, name in sorted(LANGUAGE_NAMES.items(), key=lambda x: x[1]):
+            self.target_lang_combo.addItem(f"{name} ({code})", code)
+        self.target_lang_combo.addItem(self._CUSTOM_ENTRY, self._CUSTOM_ENTRY)
+
+        self.source_lang_custom_edit = QLineEdit(self)
+        self.source_lang_custom_edit.setVisible(False)
+        self.source_lang_custom_edit.setPlaceholderText("Language code (e.g. en, ja, zh-hans)")
+
+        self.target_lang_custom_edit = QLineEdit(self)
+        self.target_lang_custom_edit.setVisible(False)
+        self.target_lang_custom_edit.setPlaceholderText("Language code (e.g. en, ja, zh-hans)")
+
+        qconnect(self.note_type_combo.currentTextChanged, self._reload_field_combos)
+        qconnect(self.source_lang_combo.currentIndexChanged, self._on_source_lang_changed)
+        qconnect(self.target_lang_combo.currentIndexChanged, self._on_target_lang_changed)
+
+        lang_layout = QHBoxLayout()
+        lang_layout.addWidget(self.source_lang_combo)
+        lang_layout.addWidget(self.source_lang_custom_edit)
+
+        lang_layout_target = QHBoxLayout()
+        lang_layout_target.addWidget(self.target_lang_combo)
+        lang_layout_target.addWidget(self.target_lang_custom_edit)
+
+        form = QFormLayout()
+        form.addRow("Deck", self.deck_combo)
+        form.addRow("Note type", self.note_type_combo)
+        form.addRow("Source field", self.source_field_combo)
+        form.addRow("Target field", self.target_field_combo)
+        form.addRow("Source language", lang_layout)
+        form.addRow("Target language", lang_layout_target)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        qconnect(buttons.accepted, self.accept)
+        qconnect(buttons.rejected, self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+        if mapping:
+            self.deck_combo.setCurrentText(mapping.deck_name)
+            self.note_type_combo.setCurrentText(mapping.note_type_name)
+        self._reload_field_combos()
+        if mapping:
+            self.source_field_combo.setCurrentText(mapping.source_field)
+            self.target_field_combo.setCurrentText(mapping.target_field)
+            self._set_language_combo(self.source_lang_combo, self.source_lang_custom_edit, mapping.source_language)
+            self._set_language_combo(self.target_lang_combo, self.target_lang_custom_edit, mapping.target_language)
+        self._on_source_lang_changed()
+        self._on_target_lang_changed()
+
+    def _set_language_combo(
+        self,
+        combo: QComboBox,
+        custom_edit: QLineEdit,
+        code: str,
+    ) -> None:
+        for i in range(combo.count() - 1):
+            if combo.itemData(i) == code:
+                combo.setCurrentIndex(i)
+                return
+        combo.setCurrentIndex(combo.count() - 1)
+        custom_edit.setText(code)
+
+    def _reload_field_combos(self) -> None:
+        self.source_field_combo.clear()
+        self.target_field_combo.clear()
+        note_type_name = self.note_type_combo.currentText()
+        notetype_id = mw.col.models.id_for_name(note_type_name)
+        if not notetype_id:
+            return
+        notetype = mw.col.models.get(notetype_id)
+        if not notetype:
+            return
+        field_names = mw.col.models.field_names(notetype)
+        self.source_field_combo.addItems(field_names)
+        self.target_field_combo.addItems(field_names)
+
+    def _on_source_lang_changed(self) -> None:
+        is_custom = self.source_lang_combo.currentData() == self._CUSTOM_ENTRY
+        self.source_lang_custom_edit.setVisible(is_custom)
+
+    def _on_target_lang_changed(self) -> None:
+        is_custom = self.target_lang_combo.currentData() == self._CUSTOM_ENTRY
+        self.target_lang_custom_edit.setVisible(is_custom)
+
+    def _get_language(self, combo: QComboBox, custom_edit: QLineEdit) -> str:
+        if combo.currentData() == self._CUSTOM_ENTRY:
+            return custom_edit.text().strip()
+        return str(combo.currentData())
+
+    def mapping(self) -> TranslationMappingConfig:
+        return TranslationMappingConfig(
+            deck_name=self.deck_combo.currentText().strip(),
+            note_type_name=self.note_type_combo.currentText().strip(),
+            source_field=self.source_field_combo.currentText().strip(),
+            target_field=self.target_field_combo.currentText().strip(),
+            source_language=self._get_language(self.source_lang_combo, self.source_lang_custom_edit),
+            target_language=self._get_language(self.target_lang_combo, self.target_lang_custom_edit),
+        )
+
+    def accept(self) -> None:
+        mapping = self.mapping()
+        if not all(
+            [
+                mapping.deck_name,
+                mapping.note_type_name,
+                mapping.source_field,
+                mapping.target_field,
+                mapping.source_language,
+                mapping.target_language,
+            ]
+        ):
+            showWarning("Every translation mapping needs a deck, note type, source field, target field, source language, and target language.")
+            return
+        super().accept()
+
+
+class TranslationHeaderEditorDialog(QDialog):
+    def __init__(self, parent: QWidget, header: TranslationHeaderConfig | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Translation HTTP Header")
+        self.setModal(True)
+
+        self.name_edit = QLineEdit(self)
+        self.value_edit = QLineEdit(self)
+        if header:
+            self.name_edit.setText(header.name)
+            self.value_edit.setText(header.value)
+
+        form = QFormLayout()
+        form.addRow("Header name", self.name_edit)
+        form.addRow("Header value", self.value_edit)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        qconnect(buttons.accepted, self.accept)
+        qconnect(buttons.rejected, self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+    def header(self) -> TranslationHeaderConfig:
+        return TranslationHeaderConfig(
+            name=self.name_edit.text().strip(),
+            value=self.value_edit.text(),
+        )
+
+    def accept(self) -> None:
+        if not self.name_edit.text().strip():
+            showWarning("Header name cannot be empty.")
+            return
+        super().accept()
+
+
 class ConfigDialog(QDialog):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -265,11 +462,69 @@ class ConfigDialog(QDialog):
         self.setModal(True)
 
         self.config = load_config()
+
         self.mappings = list(self.config.mappings)
         self.headers = list(self.config.headers)
         self.reference_source_path = ""
         self.transcript_source_path = ""
 
+        self.transl_mappings = list(self.config.translation_mappings)
+        self.transl_headers = list(self.config.translation_headers)
+
+        self._init_tts_widgets()
+        self._init_translation_widgets()
+        self._init_tables()
+
+        self.tabs = QTabWidget(self)
+
+        self.tts_layout = QVBoxLayout()
+        self.tts_layout.addWidget(self._build_endpoint_group())
+        self.tts_layout.addWidget(self._build_assets_group())
+        self.tts_layout.addWidget(self._build_options_group())
+        self.tts_layout.addWidget(self._build_mappings_group())
+        self.tts_layout.addWidget(self._build_headers_group())
+        self.tts_layout.addStretch(1)
+
+        self.tts_content_widget = QWidget(self)
+        self.tts_content_widget.setLayout(self.tts_layout)
+
+        self.tts_scroll = QScrollArea(self)
+        self.tts_scroll.setWidgetResizable(True)
+        self.tts_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.tts_scroll.setWidget(self.tts_content_widget)
+        self.tabs.addTab(self.tts_scroll, "TTS")
+
+        self.transl_layout = QVBoxLayout()
+        self.transl_layout.addWidget(self._build_translation_endpoint_group())
+        self.transl_layout.addWidget(self._build_translation_options_group())
+        self.transl_layout.addWidget(self._build_translation_mappings_group())
+        self.transl_layout.addWidget(self._build_translation_headers_group())
+        self.transl_layout.addStretch(1)
+
+        self.transl_content_widget = QWidget(self)
+        self.transl_content_widget.setLayout(self.transl_layout)
+
+        self.transl_scroll = QScrollArea(self)
+        self.transl_scroll.setWidgetResizable(True)
+        self.transl_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.transl_scroll.setWidget(self.transl_content_widget)
+        self.tabs.addTab(self.transl_scroll, "Translation")
+
+        root = QVBoxLayout(self)
+        root.addWidget(self.tabs)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        qconnect(buttons.accepted, self.accept)
+        qconnect(buttons.rejected, self.reject)
+        root.addWidget(buttons)
+
+        self._apply_initial_size(parent)
+
+    def _init_tts_widgets(self) -> None:
         self.host_edit = QLineEdit(self.config.endpoint.host, self)
         self.port_spin = QSpinBox(self)
         self.port_spin.setRange(1, 65535)
@@ -300,57 +555,55 @@ class ConfigDialog(QDialog):
         )
         self.overwrite_tts_note.setWordWrap(True)
 
-        self.reference_label = WrappingPathLabel()
+        self.reference_label = WrappingPathLabel(self)
         self.reference_label.set_path_text(
             self._display_asset_path(self.config.reference_audio_path)
         )
-        self.transcript_label = WrappingPathLabel()
+        self.transcript_label = WrappingPathLabel(self)
         self.transcript_label.set_path_text(
             self._display_asset_path(self.config.transcript_path)
         )
 
+    def _init_translation_widgets(self) -> None:
+        self.transl_host_edit = QLineEdit(self.config.translation_endpoint.host, self)
+        self.transl_port_spin = QSpinBox(self)
+        self.transl_port_spin.setRange(1, 65535)
+        self.transl_port_spin.setValue(self.config.translation_endpoint.port)
+        self.transl_path_edit = QLineEdit(self.config.translation_endpoint.path, self)
+        self.transl_timeout_spin = QSpinBox(self)
+        self.transl_timeout_spin.setRange(5, 600)
+        self.transl_timeout_spin.setValue(self.config.translation_endpoint.timeout_seconds)
+        self.transl_model_edit = QLineEdit(self.config.translation_endpoint.model, self)
+        self.transl_max_tokens_spin = QSpinBox(self)
+        self.transl_max_tokens_spin.setRange(1, 8192)
+        self.transl_max_tokens_spin.setValue(self.config.translation_endpoint.max_tokens)
+        self.transl_overwrite_checkbox = QCheckBox(
+            "Allow overwriting existing target field text",
+            self,
+        )
+        self.transl_overwrite_checkbox.setChecked(
+            self.config.translation_overwrite_existing
+        )
+
+    def _init_tables(self) -> None:
         self.mapping_table = self._build_mapping_table()
         self.header_table = self._build_header_table()
         self._refresh_mapping_table()
         self._refresh_header_table()
 
-        content = QWidget(self)
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.addWidget(self._build_endpoint_group())
-        content_layout.addWidget(self._build_assets_group())
-        content_layout.addWidget(self._build_options_group())
-        content_layout.addWidget(self._build_mappings_group())
-        content_layout.addWidget(self._build_headers_group())
-        content_layout.addStretch(1)
-
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setWidget(content)
-
-        root = QVBoxLayout(self)
-        root.addWidget(scroll)
-
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel,
-            parent=self,
-        )
-        qconnect(buttons.accepted, self.accept)
-        qconnect(buttons.rejected, self.reject)
-        root.addWidget(buttons)
-
-        self._apply_initial_size(parent)
+        self.transl_mapping_table = self._build_translation_mapping_table()
+        self.transl_header_table = self._build_translation_header_table()
+        self._refresh_translation_mapping_table()
+        self._refresh_translation_header_table()
 
     def _apply_initial_size(self, parent: QWidget) -> None:
         parent_size = parent.size() if parent else mw.size()
         width = min(max(760, int(parent_size.width() * 0.68)), int(parent_size.width() * 0.9))
-        height = max(560, int(parent_size.height() * 0.82))
+        height = max(600, int(parent_size.height() * 0.82))
         self.resize(width, height)
         self.setMinimumWidth(720)
         self.setMaximumWidth(max(760, int(parent_size.width() * 0.92)))
-        self.setMinimumHeight(520)
+        self.setMinimumHeight(540)
 
     def _build_endpoint_group(self) -> QGroupBox:
         group = QGroupBox("Endpoint")
@@ -584,23 +837,179 @@ class ConfigDialog(QDialog):
             return "Not configured"
         return str((USER_FILES_DIR / relative_path).resolve())
 
+    def _build_translation_endpoint_group(self) -> QGroupBox:
+        group = QGroupBox("Translation Endpoint")
+        form = QFormLayout(group)
+        form.addRow("Host", self.transl_host_edit)
+        form.addRow("Port", self.transl_port_spin)
+        form.addRow("Path", self.transl_path_edit)
+        form.addRow("Timeout (seconds)", self.transl_timeout_spin)
+        form.addRow("Model", self.transl_model_edit)
+        form.addRow("Max output tokens", self.transl_max_tokens_spin)
+        return group
+
+    def _build_translation_options_group(self) -> QGroupBox:
+        group = QGroupBox("Translation Options")
+        layout = QVBoxLayout(group)
+        layout.addWidget(self.transl_overwrite_checkbox)
+        return group
+
+    def _build_translation_mappings_group(self) -> QGroupBox:
+        group = QGroupBox("Translation Mappings")
+        layout = QVBoxLayout(group)
+        layout.addWidget(self.transl_mapping_table)
+
+        buttons = QHBoxLayout()
+        add_button = QPushButton("Add mapping", self)
+        edit_button = QPushButton("Edit mapping", self)
+        remove_button = QPushButton("Remove mapping", self)
+        qconnect(add_button.clicked, self._add_transl_mapping)
+        qconnect(edit_button.clicked, self._edit_transl_mapping)
+        qconnect(remove_button.clicked, self._remove_transl_mapping)
+        buttons.addWidget(add_button)
+        buttons.addWidget(edit_button)
+        buttons.addWidget(remove_button)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+        return group
+
+    def _build_translation_headers_group(self) -> QGroupBox:
+        group = QGroupBox("Translation Custom Headers")
+        layout = QVBoxLayout(group)
+        layout.addWidget(self.transl_header_table)
+
+        buttons = QHBoxLayout()
+        add_button = QPushButton("Add header", self)
+        edit_button = QPushButton("Edit header", self)
+        remove_button = QPushButton("Remove header", self)
+        qconnect(add_button.clicked, self._add_transl_header)
+        qconnect(edit_button.clicked, self._edit_transl_header)
+        qconnect(remove_button.clicked, self._remove_transl_header)
+        buttons.addWidget(add_button)
+        buttons.addWidget(edit_button)
+        buttons.addWidget(remove_button)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+        return group
+
+    def _build_translation_mapping_table(self) -> QTableWidget:
+        table = QTableWidget(self)
+        table.setColumnCount(6)
+        table.setHorizontalHeaderLabels(
+            ["Deck", "Note Type", "Source Field", "Target Field", "Source Lang", "Target Lang"]
+        )
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        return table
+
+    def _build_translation_header_table(self) -> QTableWidget:
+        table = QTableWidget(self)
+        table.setColumnCount(2)
+        table.setHorizontalHeaderLabels(["Header", "Value"])
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        return table
+
+    def _refresh_translation_mapping_table(self) -> None:
+        self.transl_mapping_table.setRowCount(len(self.transl_mappings))
+        for row, m in enumerate(self.transl_mappings):
+            self.transl_mapping_table.setItem(row, 0, QTableWidgetItem(m.deck_name))
+            self.transl_mapping_table.setItem(row, 1, QTableWidgetItem(m.note_type_name))
+            self.transl_mapping_table.setItem(row, 2, QTableWidgetItem(m.source_field))
+            self.transl_mapping_table.setItem(row, 3, QTableWidgetItem(m.target_field))
+            self.transl_mapping_table.setItem(row, 4, QTableWidgetItem(m.source_language))
+            self.transl_mapping_table.setItem(row, 5, QTableWidgetItem(m.target_language))
+
+    def _refresh_translation_header_table(self) -> None:
+        self.transl_header_table.setRowCount(len(self.transl_headers))
+        for row, header in enumerate(self.transl_headers):
+            self.transl_header_table.setItem(row, 0, QTableWidgetItem(header.name))
+            self.transl_header_table.setItem(row, 1, QTableWidgetItem(header.value))
+
+    def _add_transl_mapping(self) -> None:
+        dialog = TranslationMappingEditorDialog(self)
+        if dialog.exec():
+            self.transl_mappings.append(dialog.mapping())
+            self._refresh_translation_mapping_table()
+
+    def _edit_transl_mapping(self) -> None:
+        row = self._selected_row(self.transl_mapping_table)
+        if row is None:
+            showInfo("Select a translation mapping to edit.")
+            return
+        dialog = TranslationMappingEditorDialog(self, self.transl_mappings[row])
+        if dialog.exec():
+            self.transl_mappings[row] = dialog.mapping()
+            self._refresh_translation_mapping_table()
+
+    def _remove_transl_mapping(self) -> None:
+        row = self._selected_row(self.transl_mapping_table)
+        if row is None:
+            showInfo("Select a translation mapping to remove.")
+            return
+        del self.transl_mappings[row]
+        self._refresh_translation_mapping_table()
+
+    def _add_transl_header(self) -> None:
+        dialog = TranslationHeaderEditorDialog(self)
+        if dialog.exec():
+            self.transl_headers.append(dialog.header())
+            self._refresh_translation_header_table()
+
+    def _edit_transl_header(self) -> None:
+        row = self._selected_row(self.transl_header_table)
+        if row is None:
+            showInfo("Select a header to edit.")
+            return
+        dialog = TranslationHeaderEditorDialog(self, self.transl_headers[row])
+        if dialog.exec():
+            self.transl_headers[row] = dialog.header()
+            self._refresh_translation_header_table()
+
+    def _remove_transl_header(self) -> None:
+        row = self._selected_row(self.transl_header_table)
+        if row is None:
+            showInfo("Select a header to remove.")
+            return
+        del self.transl_headers[row]
+        self._refresh_translation_header_table()
+
     def _validate(self) -> str | None:
         if not self.host_edit.text().strip():
-            return "Host cannot be empty."
+            return "TTS tab: host cannot be empty."
         if not self.path_edit.text().strip():
-            return "Path cannot be empty."
+            return "TTS tab: path cannot be empty."
         if not self.text_field_edit.text().strip():
-            return "The text form field name cannot be empty."
+            return "TTS tab: the text form field name cannot be empty."
         if not self.reference_audio_field_edit.text().strip():
-            return "The reference audio form field name cannot be empty."
+            return "TTS tab: the reference audio form field name cannot be empty."
         seen: set[tuple[str, str]] = set()
         for mapping in self.mappings:
             key = (mapping.deck_name, mapping.note_type_name)
             if key in seen:
                 return (
-                    "Each deck and note type combination can only appear once in the mapping table."
+                    "TTS tab: each deck and note type combination can only appear once in the mapping table."
                 )
             seen.add(key)
+
+        if not self.transl_host_edit.text().strip():
+            return "Translation tab: host cannot be empty."
+        if not self.transl_path_edit.text().strip():
+            return "Translation tab: path cannot be empty."
+        if not self.transl_model_edit.text().strip():
+            return "Translation tab: model name cannot be empty."
+        seen_transl: set[tuple[str, str]] = set()
+        for m in self.transl_mappings:
+            key = (m.deck_name, m.note_type_name)
+            if key in seen_transl:
+                return (
+                    "Translation tab: each deck and note type combination can only appear once in the mapping table."
+                )
+            seen_transl.add(key)
         return None
 
     def accept(self) -> None:
@@ -643,6 +1052,17 @@ class ConfigDialog(QDialog):
             transcript_path=transcript_path,
             overwrite_existing_tts_audio=self.overwrite_tts_checkbox.isChecked(),
             mappings=[replace(mapping) for mapping in self.mappings],
+            translation_endpoint=TranslationEndpointConfig(
+                host=self.transl_host_edit.text().strip(),
+                port=self.transl_port_spin.value(),
+                path=self.transl_path_edit.text().strip(),
+                timeout_seconds=self.transl_timeout_spin.value(),
+                model=self.transl_model_edit.text().strip(),
+                max_tokens=self.transl_max_tokens_spin.value(),
+            ),
+            translation_headers=[replace(h) for h in self.transl_headers if h.name],
+            translation_mappings=[replace(m) for m in self.transl_mappings],
+            translation_overwrite_existing=self.transl_overwrite_checkbox.isChecked(),
         )
         save_config(config)
         super().accept()

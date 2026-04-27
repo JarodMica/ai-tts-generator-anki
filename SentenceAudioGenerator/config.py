@@ -107,6 +107,91 @@ class EndpointConfig:
 
 
 @dataclass
+class TranslationHeaderConfig:
+    name: str
+    value: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TranslationHeaderConfig":
+        return cls(
+            name=str(data.get("name", "")).strip(),
+            value=str(data.get("value", "")),
+        )
+
+    def to_dict(self) -> dict[str, str]:
+        return {"name": self.name, "value": self.value}
+
+
+@dataclass
+class TranslationMappingConfig:
+    deck_name: str
+    note_type_name: str
+    source_field: str
+    target_field: str
+    source_language: str
+    target_language: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TranslationMappingConfig":
+        return cls(
+            deck_name=str(data.get("deck_name", "")).strip(),
+            note_type_name=str(data.get("note_type_name", "")).strip(),
+            source_field=str(data.get("source_field", "")).strip(),
+            target_field=str(data.get("target_field", "")).strip(),
+            source_language=str(data.get("source_language", "")).strip(),
+            target_language=str(data.get("target_language", "")).strip(),
+        )
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "deck_name": self.deck_name,
+            "note_type_name": self.note_type_name,
+            "source_field": self.source_field,
+            "target_field": self.target_field,
+            "source_language": self.source_language,
+            "target_language": self.target_language,
+        }
+
+
+@dataclass
+class TranslationEndpointConfig:
+    host: str = "127.0.0.1"
+    port: int = 8009
+    path: str = "/v1/completions"
+    timeout_seconds: int = 120
+    model: str = "translategemma-4b-it"
+    max_tokens: int = 256
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TranslationEndpointConfig":
+        defaults = DEFAULT_CONFIG["translation_endpoint"]
+        return cls(
+            host=str(data.get("host", defaults["host"])).strip() or defaults["host"],
+            port=int(data.get("port", defaults["port"])),
+            path=str(data.get("path", defaults["path"])).strip() or defaults["path"],
+            timeout_seconds=int(
+                data.get("timeout_seconds", defaults["timeout_seconds"])
+            ),
+            model=str(data.get("model", defaults["model"])).strip() or defaults["model"],
+            max_tokens=int(data.get("max_tokens", defaults["max_tokens"])),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "host": self.host,
+            "port": self.port,
+            "path": self.path,
+            "timeout_seconds": self.timeout_seconds,
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+        }
+
+    def url(self) -> str:
+        path = self.path if self.path.startswith("/") else f"/{self.path}"
+        return f"http://{self.host}:{self.port}{path}"
+
+
+@dataclass
 class AddonConfig:
     endpoint: EndpointConfig = field(default_factory=EndpointConfig)
     headers: list[HeaderConfig] = field(default_factory=list)
@@ -114,6 +199,10 @@ class AddonConfig:
     transcript_path: str = ""
     overwrite_existing_tts_audio: bool = False
     mappings: list[MappingConfig] = field(default_factory=list)
+    translation_endpoint: TranslationEndpointConfig = field(default_factory=TranslationEndpointConfig)
+    translation_headers: list[TranslationHeaderConfig] = field(default_factory=list)
+    translation_mappings: list[TranslationMappingConfig] = field(default_factory=list)
+    translation_overwrite_existing: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "AddonConfig":
@@ -140,6 +229,25 @@ class AddonConfig:
                 for item in list(payload.get("mappings", []))
                 if isinstance(item, dict)
             ],
+            translation_endpoint=TranslationEndpointConfig.from_dict(
+                dict(payload.get("translation_endpoint", DEFAULT_CONFIG["translation_endpoint"]))
+            ),
+            translation_headers=[
+                TranslationHeaderConfig.from_dict(item)
+                for item in list(payload.get("translation_headers", []))
+                if isinstance(item, dict)
+            ],
+            translation_mappings=[
+                TranslationMappingConfig.from_dict(item)
+                for item in list(payload.get("translation_mappings", []))
+                if isinstance(item, dict)
+            ],
+            translation_overwrite_existing=bool(
+                payload.get(
+                    "translation_overwrite_existing",
+                    DEFAULT_CONFIG["translation_overwrite_existing"],
+                )
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -150,6 +258,10 @@ class AddonConfig:
             "transcript_path": self.transcript_path,
             "overwrite_existing_tts_audio": self.overwrite_existing_tts_audio,
             "mappings": [mapping.to_dict() for mapping in self.mappings],
+            "translation_endpoint": self.translation_endpoint.to_dict(),
+            "translation_headers": [header.to_dict() for header in self.translation_headers if header.name],
+            "translation_mappings": [mapping.to_dict() for mapping in self.translation_mappings],
+            "translation_overwrite_existing": self.translation_overwrite_existing,
         }
 
     def resolved_reference_audio_path(self) -> Path | None:

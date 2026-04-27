@@ -1,5 +1,15 @@
 # AI Changelog
 
+## 2026-04-26
+
+- Implemented "Bulk translate sentences" pipeline: new `translate_client.py` module, translation config dataclasses, translation batch functions, new Browse menu action, tabbed config dialog with Translation tab.
+- Fixed `WrappingPathLabel` parameter order mismatch that caused runtime error on config dialog open.
+- Updated `docs/DESIGN_PLAN.md`, `docs/ARCHITECTURE.md`, `docs/CONFIG.md` with translation feature documentation.
+- Created temporary `docs/FEATURE_PLAN.md` for session coordination.
+- Verified documentation against the translation feature changes; reconciled README, architecture, config, and operations docs with the current Browse translation action, vLLM endpoint defaults, translation mappings, and config fallback behavior.
+- Inconsistencies found: README and operations docs still described only TTS usage; architecture data flow still described only generated audio output; config docs stated all defaults were shipped in `config.json` even though translation defaults currently come from `constants.py` fallback values.
+- Reconciled ignored internal planning docs by adding the README to the translation feature documentation references, removing a duplicated design-plan reference block, and marking completed translation implementation checklist items in the temporary feature plan.
+
 ## 2026-04-25
 
 - Added minimal `docs/CODE_STANDARDS.md` with `Public docs: false` so documentation update workflows have the required repository standards file.

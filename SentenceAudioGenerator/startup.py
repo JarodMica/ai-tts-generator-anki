@@ -5,7 +5,7 @@ from aqt.browser import Browser
 from aqt.qt import QAction
 from aqt.utils import qconnect
 
-from .batch import run_bulk_add_tts
+from .batch import run_bulk_add_tts, run_bulk_translate
 from .config import ensure_user_dirs
 from .config_dialog import show_config_dialog
 
@@ -17,7 +17,12 @@ def setup_addon() -> None:
 
 
 def on_browser_menus_did_init(browser: Browser) -> None:
-    action = QAction("Bulk add TTS", browser)
-    qconnect(action.triggered, lambda: run_bulk_add_tts(browser))
+    tts_action = QAction("Bulk add TTS", browser)
+    qconnect(tts_action.triggered, lambda: run_bulk_add_tts(browser))
     browser.form.menuEdit.addSeparator()
-    browser.form.menuEdit.addAction(action)
+    browser.form.menuEdit.addAction(tts_action)
+
+    translate_action = QAction("Bulk translate sentences", browser)
+    qconnect(translate_action.triggered, lambda: run_bulk_translate(browser))
+    browser.form.menuEdit.addSeparator()
+    browser.form.menuEdit.addAction(translate_action)
